@@ -1,4 +1,4 @@
-"""臺北 YouBike 空站觀察：115-1 地理資訊系統運用程式的 App 範本。
+"""臺北 YouBike 空站觀察：依 HW3 資料比較各行政區各時段空站比例。
 
 執行方式：在終端機輸入 solara run app.py
 """
@@ -9,22 +9,43 @@ import pandas as pd
 import plotly.express as px
 import solara
 
-DATA_PATH = Path(__file__).parent / "data" / "youbike_sample.csv"
+DATA_PATH = Path(__file__).parent / "data" / "youbike_hw3_cleaned_long.csv"
 
-# 讀檔放在元件外面：App 啟動時只讀一次，切換選項時不會重新讀檔。
-# sno、act 指定為字串，避免被自動轉成整數（W3 的 read_json 陷阱，read_csv 也一樣）。
+# 在元件外讀取一次，保留 HW3 已整理的納入與空站判定欄位。
 df = pd.read_csv(DATA_PATH, dtype={"sno": str, "act": str})
-df = df[df["act"] == "1"]  # 只看營運中的站
+行政區們 = sorted(df["sarea"].dropna().unique().tolist())
+時段們 = (
+    df[["period", "snapshot_time"]]
+    .drop_duplicates()
+    .sort_values("snapshot_time")["period"]
+    .tolist()
+)
+快照資訊 = (
+    df[["infoDate", "snapshot_time"]]
+    .drop_duplicates()
+    .sort_values("snapshot_time")
+)
 
-時段們 = sorted(df["時段"].unique())
-
-# reactive：值改變時，用到它的元件會自動重新執行。
+行政區 = solara.reactive("大安區" if "大安區" in 行政區們 else 行政區們[0])
 門檻 = solara.reactive(0)
 時段 = solara.reactive(時段們[0])
 
 
+def 各時段空站統計(資料):
+    """依 HW3 標記計算各時段納入站點的數量與空站比例。"""
+    表 = (
+        資料.groupby("period", sort=False)
+        .agg(站點總數=("sno", "size"), 空站數=("empty", "sum"))
+        .reindex(時段們)
+    )
+    表[["站點總數", "空站數"]] = 表[["站點總數", "空站數"]].fillna(0).astype(int)
+    分母 = 表["站點總數"].where(表["站點總數"] != 0)
+    表["空站比例（%）"] = (表["空站數"] / 分母 * 100).round(1)
+    return 表.rename_axis("資料時段").reset_index()
+
+
 def 各區空站比例(資料, 門檻值):
-    """計算各區的站數、空站數與空站比例（可借車 <= 門檻值 算空站）。"""
+    """沿用原功能，以可借車數門檻計算各區空站比例。"""
     資料 = 資料.assign(空站=資料["available_rent_bikes"] <= 門檻值)
     表 = 資料.groupby("sarea").agg(站數=("sno", "size"), 空站數=("空站", "sum"))
     表["空站比例"] = (表["空站數"] / 表["站數"]).round(3)
@@ -34,36 +55,66 @@ def 各區空站比例(資料, 門檻值):
 @solara.component
 def Page():
     solara.Title("YouBike 空站觀察")
-    solara.Markdown("# 臺北 YouBike 各區空站比例")
+    solara.Markdown("# 臺北 YouBike 各行政區空站比例")
+    solara.Markdown("## 依行政區檢視 HW3 統計")
+    solara.Select(label="選擇行政區", values=行政區們, value=行政區)
 
-    # 滑桿預設會撐滿整個頁寬，用 Column 限制最大寬度，比較好操作。
+    行政區資料 = df.loc[
+        (df["sarea"] == 行政區.value) & df["analysis_included"]
+    ]
+    表 = 各時段空站統計(行政區資料)
+    圖 = px.bar(
+        表,
+        x="資料時段",
+        y="空站比例（%）",
+        title=f"{行政區.value}各時段空站比例",
+        labels={"資料時段": "資料時段", "空站比例（%）": "空站比例（%）"},
+    )
+    圖.update_layout(
+        xaxis_title="資料時段",
+        yaxis={"title": "空站比例（%）", "ticksuffix": "%", "rangemode": "tozero"},
+        showlegend=False,
+    )
+    solara.FigurePlotly(圖)
+    solara.DataFrame(表)
+
+    if 表["站點總數"].sum() == 0:
+        solara.Markdown("此選項沒有納入 HW3 統計的站點，空站比例無法計算。")
+
+    solara.Markdown("## 原有全區空站觀察")
     with solara.Column(style={"max-width": "480px"}):
         solara.SliderInt("空站門檻：可借車 ≤", value=門檻, min=0, max=5)
     solara.ToggleButtonsSingle(value=時段, values=時段們)
 
-    當時 = df[df["時段"] == 時段.value]
-    表 = 各區空站比例(當時, 門檻.value)
-
-    圖 = px.bar(
-        表,
+    營運站點 = df.loc[df["act_raw"] == 1]
+    當時資料 = 營運站點.loc[營運站點["period"] == 時段.value]
+    全區表 = 各區空站比例(當時資料, 門檻.value)
+    全區圖 = px.bar(
+        全區表,
         x="空站比例",
         y="sarea",
         orientation="h",
         title=f"{時段.value}，可借車 ≤ {門檻.value} 算空站（只算營運中的站）",
         labels={"sarea": "", "空站比例": "空站比例"},
     )
-    # 每區給 30 px 高度，行政區名稱才不會被 Plotly 自動隔行省略；換成區數更多的縣市也適用。
-    圖.update_layout(
+    全區圖.update_layout(
         yaxis={"categoryorder": "total ascending"},
         xaxis_tickformat=".0%",
-        height=150 + 30 * len(表),
+        height=150 + 30 * len(全區表),
     )
-    solara.FigurePlotly(圖)
+    solara.FigurePlotly(全區圖)
+    solara.DataFrame(全區表)
 
-    solara.DataFrame(表)
-
+    星期名稱 = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+    快照文字 = "；".join(
+        f"{pd.Timestamp(日期).strftime('%Y-%m-%d')}（"
+        f"{星期名稱[pd.Timestamp(日期).dayofweek]}）"
+        f"{pd.Timestamp(時間).strftime('%H:%M:%S')}"
+        for 日期, 時間 in 快照資訊.itertuples(index=False, name=None)
+    )
     solara.Markdown(
-        "資料來源：臺北市 YouBike 2.0 即時資料（臺北市資料大平臺），"
-        "依政府資料開放授權條款第 1 版使用。"
-        f"資料時間：{時段.value}。"
+        "資料來源：[臺北市 YouBike 開放資料（臺北市資料大平臺）]"
+        "(https://tcgbusfs.blob.core.windows.net/dotapp/youbike/v2/youbike_immediate.json)。\n\n"
+        f"資料日期、星期與快照時間：{快照文字}。\n\n"
+        "資料授權：政府資料開放授權條款－第 1 版。"
     )
