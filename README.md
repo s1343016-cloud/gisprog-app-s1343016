@@ -11,7 +11,30 @@ license: mit
 
 # 臺北 YouBike 空站觀察
 
-> 上面 `---` 之間的設定是給 HuggingFace Spaces 讀的（W5 部署時使用），請保留。
+線上網址：https://gisprog-app-s1343016.onrender.com/
+
+GitHub 更新後，請在 Render 確認新的部署成功，再檢查上述網址。
+
+## HW5 地圖與手機版
+
+- 選擇行政區及時段後，leafmap 地圖、站點表及供應分級圖使用同一份 HW3 納入站點資料。
+- 可借車數分為 0、1–3、4–9、10 輛以上；點擊地圖站點可查看站名及可借車數。
+- 使用歷史快照，並非即時車況。地圖標示快照時間，底圖採 OpenStreetMap。
+- 手機使用單欄、可換行表格與自動寬度圖表；原有跨時段 HW3 統計與可調門檻的全區分析仍分別保留。
+
+## Render 部署及驗證
+
+Render Web Service 使用本 repo 的 Dockerfile；環境變數設定 `PORT=7860`。服務以非 root 使用者執行，監聽 `0.0.0.0:7860`。
+
+安裝與測試：
+
+```bash
+pip install -r requirements.txt
+python -m unittest discover -s tests -v
+solara run app.py
+```
+
+在 390×844、844×390 及桌面尺寸，檢查整頁沒有水平捲動、圖表刻度及文字完整、表格可讀、地圖能點擊。切換行政區與三個時段、重新整理、橫直向切換後重做檢查。可在瀏覽器開發者工具記錄 `document.documentElement.clientWidth` 與 `document.documentElement.scrollWidth`；兩者相等仍須確認沒有被裁切的內容。
 
 這個 App 使用 HW3 整理的 YouBike 快照資料，觀察臺北各行政區在不同時段的空站情形。選擇行政區後，可比較各時段的站點總數、空站數與空站比例；原有的全區分析也保留時段選擇與空站門檻，可比較不同行政區的空站比例。
 
